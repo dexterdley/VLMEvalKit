@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings
+import sys
 
 import torch
 
@@ -10,9 +11,12 @@ from ..base import BaseModel
 from .prompt import Qwen3VLPromptMixin
 from ...smp import get_gpu_memory, listinstr
 
+# Add project root to sys.path to allow sibling imports
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 VLLM_MAX_IMAGE_INPUT_NUM = 24
-
 
 def is_moe_model(model_path: str) -> bool:
     """Check if the model is a Mixture of Experts model."""
@@ -64,6 +68,8 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
         post_process: bool = False,
         verbose: bool = False,
         use_audio_in_video: bool = True,
+        do_sample: bool = False, # added
+        visual_alpha: float = 1.0, # added
         **kwargs,
     ) -> None:
         super().__init__(use_custom_prompt=use_custom_prompt)
@@ -76,6 +82,8 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
         self.repetition_penalty = repetition_penalty
         self.presence_penalty = presence_penalty
         self.temperature = temperature
+        self.do_sample = do_sample # added
+        self.visual_alpha = visual_alpha
         if self.total_pixels and self.total_pixels > 24576 * 32 * 32:
             print('The total number of video tokens might too large, resulting in an overly long input sequence.')
         self.generate_kwargs = dict(
@@ -84,6 +92,7 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
             top_k=top_k,
             temperature=temperature,
             repetition_penalty=repetition_penalty,
+            do_sample=do_sample, # added
         )
         self.system_prompt = system_prompt
         self.verbose = verbose
@@ -148,14 +157,20 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
         else:
             if listinstr(['omni'], model_path.lower()):
                 self.model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
-                    model_path, dtype='auto', device_map='auto', attn_implementation='flash_attention_2'
+                    model_path, dtype=torch.bfloat16, device_map="cuda", attn_implementation="flash_attention_2"
                 )
             else:
                 self.model = AutoModelForImageTextToText.from_pretrained(
-                    model_path, torch_dtype='auto', device_map='auto', attn_implementation='flash_attention_2'
+                    model_path, dtype=torch.bfloat16, device_map="cuda", attn_implementation="flash_attention_2"
                 )
             self.model.eval()
 
+            ### Start of additions ###
+            self.model = torch.compile(self.model)
+
+            if self.visual_alpha > 0 and not self.use_vllm:
+                self.model.generation_config.visual_alpha = self.visual_alpha
+            ### End of additions ###
         torch.cuda.empty_cache()
 
     def _prepare_content(self, inputs: list[dict[str, str]], dataset: str | None = None) -> list[dict[str, str]]:
@@ -291,12 +306,14 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
                     return_audio=False,
                     thinker_return_dict_in_generate=True,
                     use_audio_in_video=self.use_audio_in_video,
+                    **self.generate_kwargs,
                 )
             except TypeError:
                 text_ids, _ = self.model.generate(
                     **inputs,
                     return_audio=False,
                     use_audio_in_video=self.use_audio_in_video,
+                    **self.generate_kwargs,
                 )
             response = self.processor.batch_decode(
                 text_ids.sequences[:, inputs["input_ids"].shape[1]:],
@@ -372,7 +389,7 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
             )
 
         sampling_params = SamplingParams(
-            temperature=self.temperature,
+            temperature=self.temperature if self.do_sample else 0.0, # added
             max_tokens=self.max_new_tokens,
             top_p=self.top_p,
             top_k=self.top_k,
