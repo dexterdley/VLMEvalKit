@@ -1176,7 +1176,7 @@ qwen3vl_series = {
         repetition_penalty=1.0,
         presence_penalty=1.5,
         top_p=0.8,
-        top_k=None
+        top_k=20
     ),
     "Qwen3-VL-4B-Instruct": partial(
         Qwen3VLChat,

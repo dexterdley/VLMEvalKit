@@ -474,12 +474,19 @@ def main():
                         assert isinstance(eval_results, dict) or isinstance(eval_results, pd.DataFrame)
                         logger.info(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
                         logger.info('Evaluation Results:')
+                        print(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
+                        print('Evaluation Results:')
+
                         if isinstance(eval_results, dict):
                             logger.info('\n' + json.dumps(eval_results, indent=4))
+                            print('\n' + json.dumps(eval_results, indent=4))
+
                         elif isinstance(eval_results, pd.DataFrame):
                             if len(eval_results) < len(eval_results.columns):
                                 eval_results = eval_results.T
+                                
                             logger.info('\n' + tabulate(eval_results))
+                            print('\n' + tabulate(eval_results))
 
                     # Restore the proxy
                     if eval_proxy is not None:
