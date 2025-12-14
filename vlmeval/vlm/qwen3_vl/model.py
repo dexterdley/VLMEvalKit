@@ -166,8 +166,6 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
             self.model.eval()
 
             ### Start of additions ###
-            self.model = torch.compile(self.model)
-
             if self.visual_alpha > 0 and not self.use_vllm:
                 self.model.generation_config.visual_alpha = self.visual_alpha
             ### End of additions ###

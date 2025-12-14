@@ -3,6 +3,16 @@ import os
 import subprocess
 from functools import partial
 
+import torch
+import numpy as np
+import random
+
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    print("SET SEED %d" %seed)
 
 # GET the number of GPUs on the node without importing libs like torch
 def get_gpu_list():
@@ -514,4 +524,5 @@ def main():
 
 if __name__ == '__main__':
     load_env()
+    set_seed(42)
     main()
