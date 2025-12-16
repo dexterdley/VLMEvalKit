@@ -7,6 +7,16 @@ import torch
 import numpy as np
 import random
 
+### Image Benchmarks
+# "MME": {}, // ~2H
+# "POPE": {}, // ~7-8H
+# "ScienceQA_VAL": {}
+
+### Video Benchmarks
+# TempCompass_8frame
+# "MMBench_Video_8frame_nopack": {}
+# VCRBench_8frame_nopack
+
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -26,7 +36,6 @@ def get_gpu_list():
         return list(range(int(output)))
     except:
         return []
-
 
 RANK = int(os.environ.get('RANK', 0))
 WORLD_SIZE = int(os.environ.get('WORLD_SIZE', 1))
@@ -48,7 +57,6 @@ if LOCAL_WORLD_SIZE > 1 and len(GPU_LIST):
         f'LOCAL_WORLD_SIZE: {LOCAL_WORLD_SIZE}, CUDA_VISIBLE_DEVICES: {CUDA_VISIBLE_DEVICES}'
     )
 
-
 from vlmeval.config import supported_VLM
 from vlmeval.dataset.video_dataset_config import supported_video_datasets
 from vlmeval.dataset import build_dataset
@@ -66,23 +74,28 @@ def build_model_from_config(cfg, model_name, use_vllm=False):
     import vlmeval.vlm
     ws_bak = os.environ.pop('WORLD_SIZE', None)
 
-    config = cp.deepcopy(cfg[model_name])
-    if use_vllm:
-        config['use_vllm'] = use_vllm
-    if 'class' not in config:
-        return supported_VLM[model_name](**config)
-    cls_name = config.pop('class')
-    if hasattr(vlmeval.api, cls_name):
-        model = getattr(vlmeval.api, cls_name)(**config)
-    elif hasattr(vlmeval.vlm, cls_name):
-        model = getattr(vlmeval.vlm, cls_name)(**config)
-    else:
-        raise ValueError(f'Class {cls_name} is not supported in `vlmeval.api` or `vlmeval.vlm`')
-
-    if ws_bak:
-        os.environ['WORLD_SIZE'] = ws_bak
-    return model
-
+    try:
+        config = cp.deepcopy(cfg[model_name])
+        if use_vllm:
+            config['use_vllm'] = use_vllm
+        
+        if 'class' not in config:
+            return supported_VLM[model_name](**config)
+        
+        cls_name = config.pop('class')
+        
+        if hasattr(vlmeval.api, cls_name):
+            model = getattr(vlmeval.api, cls_name)(**config)
+        elif hasattr(vlmeval.vlm, cls_name):
+            model = getattr(vlmeval.vlm, cls_name)(**config)
+        else:
+            raise ValueError(f'Class {cls_name} is not supported in `vlmeval.api` or `vlmeval.vlm`')
+        
+        return model
+    
+    finally:
+        if ws_bak:
+            os.environ['WORLD_SIZE'] = ws_bak
 
 def build_dataset_from_config(cfg, dataset_name):
     import vlmeval.dataset
@@ -484,19 +497,22 @@ def main():
                         assert isinstance(eval_results, dict) or isinstance(eval_results, pd.DataFrame)
                         logger.info(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
                         logger.info('Evaluation Results:')
-                        print(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
-                        print('Evaluation Results:')
+                        if RANK == 0:
+                            print(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
+                            print('Evaluation Results:')
 
                         if isinstance(eval_results, dict):
                             logger.info('\n' + json.dumps(eval_results, indent=4))
-                            print('\n' + json.dumps(eval_results, indent=4))
+                            if RANK == 0:
+                                print('\n' + json.dumps(eval_results, indent=4))
 
                         elif isinstance(eval_results, pd.DataFrame):
                             if len(eval_results) < len(eval_results.columns):
                                 eval_results = eval_results.T
                                 
                             logger.info('\n' + tabulate(eval_results))
-                            print('\n' + tabulate(eval_results))
+                            if RANK == 0:
+                                print('\n' + tabulate(eval_results))
 
                     # Restore the proxy
                     if eval_proxy is not None:

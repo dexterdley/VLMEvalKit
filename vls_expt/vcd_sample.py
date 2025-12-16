@@ -150,7 +150,6 @@ def _sample_vgd(
                     hook = layer.register_forward_pre_hook(zero_visual_embed_hook)
                     hooks.append(hook)
 
-
                 with torch.no_grad():
                     outputs_no_v = forward_call(**inputs_no_v, return_dict=True)
                 #hook_handle.remove()
@@ -163,11 +162,28 @@ def _sample_vgd(
 
                 # VGD Logic: Uncond + alpha * (Cond - Uncond)
                 vgd_logits = next_token_logits_no_v + visual_alpha * (next_token_logits - next_token_logits_no_v)
+                
+                # Truncation and Variance bounding Logic: Surprisal <= Entropy
+                probs_vgd = F.softmax(vgd_logits, dim=-1)
+                log_probs_vgd = F.log_softmax(vgd_logits, dim=-1)
+                vgd_entropy = -torch.sum(probs_vgd * log_probs_vgd, dim=-1, keepdim=True)
+                surprisal_text = -log_probs_vgd
+
+                plausibility_mask = surprisal_text <= (vgd_entropy + 1.0)
+                vgd_logits = vgd_logits.masked_fill(~plausibility_mask, -float("inf"))
                 next_token_scores = logits_processor(input_ids, vgd_logits)
 
+                '''
+                probs = F.softmax(next_token_scores, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+                original_greedy_tokens = torch.argmax(next_token_logits, dim=-1)
+                matches = (next_tokens == original_greedy_tokens)
+                print(f"Match: {matches.item()}")
+                '''
                 # print(next_token_logits.max(1)[1] == vgd_logits.max(1)[1], next_token_logits.max(1), next_token_logits_no_v.max(1), vgd_logits.max(1))
                 # pdb.set_trace()
                 ### End of VGD ###
+
             else:
                 next_token_logits = outputs.logits[:, -1, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
                 next_token_scores = logits_processor(input_ids, next_token_logits)

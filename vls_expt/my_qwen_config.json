@@ -1,10 +1,12 @@
 {
     "model": {
-        "Qwen3-VL-8B-Instruct": {
+        "Qwen3-VL-2B-Instruct": {
             "max_new_tokens": 512,
             "temperature": 1.0,
             "do_sample": true,
-
+            "verbose": false,
+            "reuse": false,
+            
             "use_custom_prompt": false,
             "use_vllm": false,
             "repetition_penalty": 1.0,
@@ -15,6 +17,8 @@
     }, 
 
     "data": {
-        "MME": {}
+        "MME": {},
+        "POPE": {},
+        "ScienceQA_VAL": {}
     }
 }
