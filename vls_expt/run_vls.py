@@ -13,7 +13,6 @@ import random
 # "ScienceQA_VAL": {}
 
 ### Video Benchmarks
-# TempCompass_8frame
 # "MMBench_Video_8frame_nopack": {}
 # VCRBench_8frame_nopack
 
@@ -379,7 +378,6 @@ def main():
                             use_vllm=args.use_vllm)
 
                 # Set the judge kwargs first before evaluation or dumping
-
                 judge_kwargs = {
                     'nproc': args.api_nproc,
                     'verbose': args.verbose,
@@ -532,11 +530,10 @@ def main():
             except Exception as e:
                 logger.exception(f'Model {model_name} x Dataset {dataset_name} combination failed: {e}, '
                                  'skipping this combination.')
-                continue
+                raise e
 
     if WORLD_SIZE > 1:
         dist.destroy_process_group()
-
 
 if __name__ == '__main__':
     load_env()
