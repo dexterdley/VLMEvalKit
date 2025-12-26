@@ -46,18 +46,29 @@ import matplotlib.pyplot as plt
 from transformers import GenerationConfig
 
 class VisualZeroHook:
-    def __init__(self, start_idx, end_idx):
+    def __init__(self, start_idx, end_idx, expand=True):
         self.start = start_idx
         self.end = end_idx
+        self.expand = expand
 
     def __call__(self, module, args):
         hidden_states = args[0]
         if isinstance(hidden_states, tuple):
             hidden_states = hidden_states[0]
-        
-        # Zero using stored attributes
-        hidden_states[:, self.start:self.end, :] = 0
-        return (hidden_states,) + args[1:]
+
+        if self.expand:
+            #min_vals = hidden_states[:, self.start:self.end, :].min(dim=-1, keepdim=True).values
+            hidden_states_no_v = hidden_states.clone()
+            hidden_states_no_v[:, self.start:self.end, :] = 0
+            new_states = torch.cat([hidden_states, hidden_states_no_v], dim=0)
+        else:
+            B = hidden_states.shape[0]
+            half = B // 2
+            hidden_states_no_v = hidden_states[half:].clone()
+            #min_vals = hidden_states[:half][:, self.start:self.end, :].min(dim=-1, keepdim=True).values
+            hidden_states_no_v[:, self.start:self.end, :] = 0
+            new_states = torch.cat([hidden_states[:half], hidden_states_no_v], dim=0)
+        return (new_states,) + args[1:]
 
 def _sample_vgd(
         self,
@@ -121,48 +132,44 @@ def _sample_vgd(
 
         vs_id  = self.model.config.vision_start_token_id       # e.g., 151652
         ve_id  = self.model.config.vision_end_token_id         # e.g., 151653
-        img_id = self.model.config.image_token_id
-        vid_id = self.model.config.video_token_id
         vstart = input_ids[0].tolist().index(vs_id)
         vend = torch.where(input_ids[0] == ve_id)[0].max().item()
 
-        model_kwargs_no_v = {
-            k: v.clone() if isinstance(v, torch.Tensor) else v
-            for k, v in model_kwargs.items()
-        } # copy model_kwargs for cd only for the first forward process
-
-        zero_visual_embed_hook = VisualZeroHook(vstart + 1, vend)
         visual_alpha = getattr(generation_config, 'visual_alpha', 0.0)
 
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             forward_call = self if is_prefill else model_forward
 
-            model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
-            outputs = forward_call(**model_inputs, return_dict=True)
+            if visual_alpha > 0.0:
+                # Expand inputs for VCD (Batch size 1 -> 2) to avoid shape mismatch in Qwen3-VL internals
+                if input_ids.shape[0] == 1:
+                    input_ids = input_ids.repeat(2, 1)
+                    new_kwargs = {}
+                    for k, v in model_kwargs.items():
+                        if isinstance(v, torch.Tensor) and (v.shape[0] == 1 or k in ["pixel_values", "image_grid_thw", "pixel_values_videos", "video_grid_thw"]):
+                            new_kwargs[k] = v.repeat(2, *([1] * (v.ndim - 1)))
+                        else:
+                            new_kwargs[k] = v
+                    model_kwargs = new_kwargs
 
-            if visual_alpha > 0:
-                ### Start of VGD ###
-                inputs_no_v = self.prepare_inputs_for_generation(input_ids, **model_kwargs_no_v)
-                #hook_handle = self.model.language_model.layers[0].register_forward_pre_hook(zero_visual_embed_hook)
+                model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
+                # Register hook on the first layer of the model
                 hooks = []
-                for layer in self.model.language_model.layers:
-                    hook = layer.register_forward_pre_hook(zero_visual_embed_hook)
-                    hooks.append(hook)
+                for i, layer in enumerate(self.model.language_model.layers):
+                    hook = VisualZeroHook(vstart + 1, vend, expand=False)
+                    hooks.append(layer.register_forward_pre_hook(hook))
 
-                with torch.no_grad():
-                    outputs_no_v = forward_call(**inputs_no_v, return_dict=True)
-                #hook_handle.remove()
-                
-                for hook in hooks:
-                    hook.remove()
+                outputs = forward_call(**model_inputs, return_dict=True)
 
-                next_token_logits = outputs.logits[:, -1, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
-                next_token_logits_no_v = outputs_no_v.logits[:, -1, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
+                for hook in hooks: hook.remove()
+
+                next_token_logits = outputs.logits[:, -1, :][0].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
+                next_token_logits_no_v = outputs.logits[:, -1, :][1].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
 
                 # VGD Logic: Uncond + alpha * (Cond - Uncond)
                 vgd_logits = next_token_logits_no_v + visual_alpha * (next_token_logits - next_token_logits_no_v)
-                
+                ''' TBD 
                 # Truncation and Variance bounding Logic: Surprisal <= Entropy
                 probs_vgd = F.softmax(vgd_logits, dim=-1)
                 log_probs_vgd = F.log_softmax(vgd_logits, dim=-1)
@@ -171,20 +178,12 @@ def _sample_vgd(
 
                 plausibility_mask = surprisal_text <= (vgd_entropy + 1.0)
                 vgd_logits = vgd_logits.masked_fill(~plausibility_mask, -float("inf"))
+                '''
                 next_token_scores = logits_processor(input_ids, vgd_logits)
 
-                '''
-                probs = F.softmax(next_token_scores, dim=-1)
-                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
-                original_greedy_tokens = torch.argmax(next_token_logits, dim=-1)
-                matches = (next_tokens == original_greedy_tokens)
-                print(f"Match: {matches.item()}")
-                '''
-                # print(next_token_logits.max(1)[1] == vgd_logits.max(1)[1], next_token_logits.max(1), next_token_logits_no_v.max(1), vgd_logits.max(1))
-                # pdb.set_trace()
-                ### End of VGD ###
-
             else:
+                model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+                outputs = forward_call(**model_inputs, return_dict=True)
                 next_token_logits = outputs.logits[:, -1, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
                 next_token_scores = logits_processor(input_ids, next_token_logits)
 
@@ -227,6 +226,9 @@ def _sample_vgd(
                 next_tokens = next_tokens * unfinished_sequences + pad_token_id * (1 - unfinished_sequences)
 
             # update generated ids, model inputs, and length for next step
+            if input_ids.shape[0] != next_tokens.shape[0] and next_tokens.shape[0] == 1:
+                next_tokens = next_tokens.repeat(input_ids.shape[0])
+
             input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
             if streamer is not None:
                 streamer.put(next_tokens.cpu())
@@ -245,14 +247,6 @@ def _sample_vgd(
             # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
             del outputs
             
-            if visual_alpha > 0:
-                model_kwargs_no_v = self._update_model_kwargs_for_generation(
-                    outputs_no_v,
-                    model_kwargs_no_v,
-                    is_encoder_decoder=self.config.is_encoder_decoder,
-                    )
-                del outputs_no_v
-
         if streamer is not None:
             streamer.end()
 

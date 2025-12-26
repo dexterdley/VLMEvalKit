@@ -19,10 +19,10 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
   --master_port=29501 \
   ./vls_expt/run_vls.py \
   --config ./vls_expt/my_qwen_config.json \
-  --visual_alpha=0.0 \
+  --visual_alpha=1.5 \
   --work-dir ./outputs/${MODEL}/${MODEL}_VGD \
   --reuse
-  > ./outputs/${MODEL}/${MODEL}_Base.txt &
+  > ./outputs/${MODEL}/${MODEL}_VGD.txt &
 
 wait
 echo "✅ Evaluations Completed."
