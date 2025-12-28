@@ -8,10 +8,16 @@ import numpy as np
 import random
 
 ### Image Benchmarks
-# "MME": {}, // ~2H
-# "POPE": {}, // ~7-8H
-# "ScienceQA_VAL": {}
-
+'''
+"data": {
+        "MME": {},
+        "POPE": {},
+        "ScienceQA_VAL": {},
+        "RealWorldQA": {},
+        "OCRBench": {},
+        "MMStar": {}
+    }
+'''
 ### Video Benchmarks
 # "MMBench_Video_8frame_nopack": {}
 # VCRBench_8frame_nopack
@@ -196,7 +202,7 @@ You can launch the evaluation by setting either --data and --model or --config.
     parser = argparse.ArgumentParser(description=help_msg, formatter_class=argparse.RawTextHelpFormatter)
     # Essential Args, Setting the Names of Datasets and Models
     parser.add_argument('--data', type=str, nargs='+', help='Names of Datasets')
-    parser.add_argument('--model', type=str, nargs='+', help='Names of Models')
+    parser.add_argument('--model', type=str, default='Qwen3-VL-2B-Instruct', nargs='+', help='Names of Models')
     parser.add_argument('--config', type=str, help='Path to the Config Json File')
     # Work Dir
     parser.add_argument('--work-dir', type=str, default='./outputs', help='select the output directory')
@@ -230,9 +236,9 @@ def main():
     args = parse_args()
     use_config, cfg = False, None
     if args.config is not None:
-        assert args.data is None and args.model is None, '--data and --model should not be set when using --config'
+        assert args.data is None, '--data should not be set when using --config'
         use_config, cfg = True, load(args.config)
-        args.model = list(cfg['model'].keys())
+        # args.model = list(cfg['model'].keys())
         args.data = list(cfg['data'].keys())
     else:
         assert len(args.data), '--data should be a list of data files'
@@ -275,6 +281,11 @@ def main():
     for _, model_name in enumerate(args.model):
         model = None
         if use_config:
+            # Replaces the current key name (e.g., 'Qwen3-VL-2B-Instruct')
+            old_model_name = list(cfg['model'].keys())[0]
+            model_cfg_params = cfg['model'].pop(old_model_name)
+            cfg['model'][args.model[0]] = model_cfg_params
+
             model_cfg = cfg['model'][model_name]
             evolve_guidance_sampling(model_cfg.get('temperature', 1.0), model_cfg.get('do_sample', True), args.visual_alpha)
             model_cfg['visual_alpha'] = args.visual_alpha

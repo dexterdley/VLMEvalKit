@@ -57,7 +57,6 @@ class VisualZeroHook:
             hidden_states = hidden_states[0]
 
         if self.expand:
-            #min_vals = hidden_states[:, self.start:self.end, :].min(dim=-1, keepdim=True).values
             hidden_states_no_v = hidden_states.clone()
             hidden_states_no_v[:, self.start:self.end, :] = 0
             new_states = torch.cat([hidden_states, hidden_states_no_v], dim=0)
@@ -65,7 +64,6 @@ class VisualZeroHook:
             B = hidden_states.shape[0]
             half = B // 2
             hidden_states_no_v = hidden_states[half:].clone()
-            #min_vals = hidden_states[:half][:, self.start:self.end, :].min(dim=-1, keepdim=True).values
             hidden_states_no_v[:, self.start:self.end, :] = 0
             new_states = torch.cat([hidden_states[:half], hidden_states_no_v], dim=0)
         return (new_states,) + args[1:]
@@ -137,55 +135,45 @@ def _sample_vgd(
 
         visual_alpha = getattr(generation_config, 'visual_alpha', 0.0)
 
+        # Expand inputs for VCD (Batch size 1 -> 2) to avoid shape mismatch in Qwen3-VL internals
+        if input_ids.shape[0] == 1:
+            input_ids = input_ids.repeat(2, 1)
+            new_kwargs = {}
+            for k, v in model_kwargs.items():
+                if isinstance(v, torch.Tensor) and (v.shape[0] == 1 or k in ["pixel_values", "image_grid_thw", "pixel_values_videos", "video_grid_thw"]):
+                    new_kwargs[k] = v.repeat(2, *([1] * (v.ndim - 1)))
+                else:
+                    new_kwargs[k] = v
+            model_kwargs = new_kwargs
+
+        # Register hook on the first layer of the model
+        hooks = []
+        for i, layer in enumerate(self.model.language_model.layers):
+            hook = VisualZeroHook(vstart + 1, vend, expand=False)
+            hooks.append(layer.register_forward_pre_hook(hook))
+
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             forward_call = self if is_prefill else model_forward
+            model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
 
-            if visual_alpha > 0.0:
-                # Expand inputs for VCD (Batch size 1 -> 2) to avoid shape mismatch in Qwen3-VL internals
-                if input_ids.shape[0] == 1:
-                    input_ids = input_ids.repeat(2, 1)
-                    new_kwargs = {}
-                    for k, v in model_kwargs.items():
-                        if isinstance(v, torch.Tensor) and (v.shape[0] == 1 or k in ["pixel_values", "image_grid_thw", "pixel_values_videos", "video_grid_thw"]):
-                            new_kwargs[k] = v.repeat(2, *([1] * (v.ndim - 1)))
-                        else:
-                            new_kwargs[k] = v
-                    model_kwargs = new_kwargs
+            outputs = forward_call(**model_inputs, return_dict=True)
 
-                model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+            next_token_logits = outputs.logits[:, -1, :][0].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
+            next_token_logits_no_v = outputs.logits[:, -1, :][1].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
 
-                # Register hook on the first layer of the model
-                hooks = []
-                for i, layer in enumerate(self.model.language_model.layers):
-                    hook = VisualZeroHook(vstart + 1, vend, expand=False)
-                    hooks.append(layer.register_forward_pre_hook(hook))
+            # VGD Logic: Uncond + alpha * (Cond - Uncond)
+            vgd_logits = next_token_logits_no_v + visual_alpha * (next_token_logits - next_token_logits_no_v)
+            ''' TBD 
+            # Truncation and Variance bounding Logic: Surprisal <= Entropy
+            probs_vgd = F.softmax(vgd_logits, dim=-1)
+            log_probs_vgd = F.log_softmax(vgd_logits, dim=-1)
+            vgd_entropy = -torch.sum(probs_vgd * log_probs_vgd, dim=-1, keepdim=True)
+            surprisal_text = -log_probs_vgd
 
-                outputs = forward_call(**model_inputs, return_dict=True)
-
-                for hook in hooks: hook.remove()
-
-                next_token_logits = outputs.logits[:, -1, :][0].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
-                next_token_logits_no_v = outputs.logits[:, -1, :][1].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
-
-                # VGD Logic: Uncond + alpha * (Cond - Uncond)
-                vgd_logits = next_token_logits_no_v + visual_alpha * (next_token_logits - next_token_logits_no_v)
-                ''' TBD 
-                # Truncation and Variance bounding Logic: Surprisal <= Entropy
-                probs_vgd = F.softmax(vgd_logits, dim=-1)
-                log_probs_vgd = F.log_softmax(vgd_logits, dim=-1)
-                vgd_entropy = -torch.sum(probs_vgd * log_probs_vgd, dim=-1, keepdim=True)
-                surprisal_text = -log_probs_vgd
-
-                plausibility_mask = surprisal_text <= (vgd_entropy + 1.0)
-                vgd_logits = vgd_logits.masked_fill(~plausibility_mask, -float("inf"))
-                '''
-                next_token_scores = logits_processor(input_ids, vgd_logits)
-
-            else:
-                model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
-                outputs = forward_call(**model_inputs, return_dict=True)
-                next_token_logits = outputs.logits[:, -1, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
-                next_token_scores = logits_processor(input_ids, next_token_logits)
+            plausibility_mask = surprisal_text <= (vgd_entropy + 1.0)
+            vgd_logits = vgd_logits.masked_fill(~plausibility_mask, -float("inf"))
+            '''
+            next_token_scores = logits_processor(input_ids, vgd_logits)
 
             if is_prefill:
                 is_prefill = False
@@ -246,7 +234,9 @@ def _sample_vgd(
             # This is needed to properly delete outputs.logits which may be very large for first iteration
             # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
             del outputs
-            
+        
+        for hook in hooks: hook.remove()
+
         if streamer is not None:
             streamer.end()
 

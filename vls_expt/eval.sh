@@ -10,6 +10,7 @@ echo "🚀 Starting Evaluations on $MODEL"
 CUDA_VISIBLE_DEVICES=0 python ./vls_expt/run_vls.py \
   --config ./vls_expt/my_qwen_config.json \
   --visual_alpha=0.0 \
+  --model=${MODEL} \
   --work-dir ./outputs/${MODEL}/${MODEL}_Base \
   > ./outputs/${MODEL}/${MODEL}_Base.txt &
 
@@ -17,6 +18,7 @@ CUDA_VISIBLE_DEVICES=0 python ./vls_expt/run_vls.py \
 CUDA_VISIBLE_DEVICES=1 python ./vls_expt/run_vls.py \
   --config ./vls_expt/my_qwen_config.json \
   --visual_alpha=1.5 \
+  --model=${MODEL} \
   --work-dir ./outputs/${MODEL}/${MODEL}_VGD \
   > ./outputs/${MODEL}/${MODEL}_VGD.txt &
 
