@@ -7,7 +7,7 @@ echo "🚀 Starting Evaluations on $MODEL"
 #CUDA_VISIBLE_DEVICES=0 python ./vls_expt/run_vls.py --config ./vls_expt/my_qwen_config.json --visual_alpha=1.5 > ./outputs/Qwen3-VL-8B-Instruct/Qwen3-VL-8B-Instruct_VGD.txt
 
 # 1. Run Base (Alpha 0.0) on GPU 0 in the background
-CUDA_VISIBLE_DEVICES=0 python ./vls_expt/run_vls.py \
+CUDA_VISIBLE_DEVICES=0 python ./vls_expt/run_vgd.py \
   --config ./vls_expt/my_qwen_config.json \
   --visual_alpha=0.0 \
   --model=${MODEL} \
@@ -15,7 +15,7 @@ CUDA_VISIBLE_DEVICES=0 python ./vls_expt/run_vls.py \
   > ./outputs/${MODEL}/${MODEL}_Base.txt &
 
 # 2. Run VGD (Alpha 1.5) on GPU 1 in the background
-CUDA_VISIBLE_DEVICES=1 python ./vls_expt/run_vls.py \
+CUDA_VISIBLE_DEVICES=1 python ./vls_expt/run_vgd.py \
   --config ./vls_expt/my_qwen_config.json \
   --visual_alpha=1.5 \
   --model=${MODEL} \

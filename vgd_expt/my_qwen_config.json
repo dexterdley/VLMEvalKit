@@ -17,8 +17,6 @@
     }, 
 
     "data": {
-        "RealWorldQA": {},
-        "OCRBench": {},
         "MMStar": {}
     }
 }

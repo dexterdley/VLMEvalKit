@@ -15,7 +15,9 @@ import random
         "ScienceQA_VAL": {},
         "RealWorldQA": {},
         "OCRBench": {},
-        "MMStar": {}
+        "MMStar": {},
+        "BLINK": {},
+        "HallusionBench": {}
     }
 '''
 ### Video Benchmarks
@@ -71,7 +73,7 @@ from vlmeval.inference_mt import infer_data_job_mt
 from vlmeval.smp import *
 from vlmeval.utils.result_transfer import MMMU_result_transfer, MMTBench_result_transfer
 
-from vls_expt.vcd_sample import evolve_guidance_sampling
+from vgd_expt.vgd_sample import evolve_guidance_sampling
 
 # Make WORLD_SIZE invisible when build models
 def build_model_from_config(cfg, model_name, use_vllm=False):
