@@ -1,6 +1,6 @@
 {
     "model": {
-        "Qwen3-VL-2B-Instruct": {
+        "MiniCPM-V-2_6": {
             "max_new_tokens": 512,
             "temperature": 1.0,
             "do_sample": true,

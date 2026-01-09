@@ -2,6 +2,8 @@ import math
 import pandas as pd
 import random
 import re
+import types
+from typing import Optional
 import yaml
 import string
 import torch
@@ -12,7 +14,7 @@ import warnings
 from PIL import Image
 from functools import partial
 from torchvision.transforms.functional import InterpolationMode
-from transformers import AutoTokenizer, AutoConfig, AutoModel, CLIPImageProcessor
+from transformers import AutoTokenizer, AutoConfig, AutoModel, CLIPImageProcessor, GenerationConfig
 
 from .utils import (build_multi_choice_prompt,
                     build_video_prompt,
@@ -103,6 +105,48 @@ def extract_boxed_content(ans: str):
     content = ans[content_start:i]
     return content
 
+@torch.no_grad()
+def vgd_generate(
+        self,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        input_ids: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
+        visual_features: Optional[torch.FloatTensor] = None,
+        generation_config: Optional[GenerationConfig] = None,
+        output_hidden_states: Optional[bool] = None,
+        **generate_kwargs,
+) -> torch.LongTensor:
+
+    assert self.img_context_token_id is not None
+    if pixel_values is not None:
+        if visual_features is not None:
+            vit_embeds = visual_features
+        else:
+            vit_embeds = self.extract_feature(pixel_values)
+        input_embeds = self.language_model.get_input_embeddings()(input_ids)
+        B, N, C = input_embeds.shape
+        input_embeds = input_embeds.reshape(B * N, C)
+
+        input_ids = input_ids.reshape(B * N)
+        selected = (input_ids == self.img_context_token_id)
+        assert selected.sum() != 0
+        input_embeds[selected] = vit_embeds.reshape(-1, C).to(input_embeds.device)
+
+        input_embeds = input_embeds.reshape(B, N, C)
+        input_ids = input_ids.reshape(B, N)
+    else:
+        input_embeds = self.language_model.get_input_embeddings()(input_ids)
+    outputs = self.language_model.generate(
+        inputs_embeds=input_embeds,
+        attention_mask=attention_mask,
+        generation_config=generation_config,
+        output_hidden_states=output_hidden_states,
+        use_cache=True,
+        vgd_input_ids=input_ids,
+        **generate_kwargs,
+    )
+
+    return outputs
 
 class InternVLChat(BaseModel):
     INSTALL_REQ = False
@@ -197,6 +241,8 @@ class InternVLChat(BaseModel):
                 low_cpu_mem_usage=True,
                 device_map="auto").eval()
             self.device = 'cuda'
+
+            self.model.generate = types.MethodType(vgd_generate, self.model)
 
         if best_of_n > 1:
             assert version == 'V2.0', 'only support BoN evaluation with version==V2.0'
@@ -421,7 +467,6 @@ class InternVLChat(BaseModel):
         for idx in range(self.best_of_n):
             kwargs_default = self.kwargs.copy()
             kwargs_default['do_sample'] = idx > 0 or kwargs_default.get('do_sample', False)
-            kwargs_default['temperature'] = 0.6
             kwargs_default['top_p'] = 0.95
 
             if self.use_lmdeploy:

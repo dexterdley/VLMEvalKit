@@ -44,6 +44,7 @@ logits_warper = LogitsProcessorList()
 IMAGE_TOKEN_INDEX = -200
 import matplotlib.pyplot as plt
 from transformers import GenerationConfig
+from transformers.generation.utils import GenerationMixin
 
 class VisualZeroHook:
     def __init__(self, start_idx, end_idx, expand=True):
@@ -128,10 +129,32 @@ def _sample_vgd(
         else:
             is_prefill = True
 
-        vs_id  = self.model.config.vision_start_token_id       # e.g., 151652
-        ve_id  = self.model.config.vision_end_token_id         # e.g., 151653
-        vstart = input_ids[0].tolist().index(vs_id)
-        vend = torch.where(input_ids[0] == ve_id)[0].max().item()
+        if "Gemma3" in type(self.model.config).__name__:
+            img_token_id = getattr(self.model.config, 'image_token_index', 262144)
+            matches = (input_ids == img_token_id).nonzero(as_tuple=True)
+            if len(matches) > 1:
+                seq_idx = matches[1]
+            else:
+                seq_idx = matches[0]
+            vstart = seq_idx.min().item()
+            vend = seq_idx.max().item() + 1
+
+        elif "Qwen3" in type(self.model.config).__name__ and 'vgd_input_ids' in model_kwargs:
+            input_ids = model_kwargs['vgd_input_ids']
+            img_context = getattr(self, 'img_context_token_id', 151671)
+            matches = (input_ids == img_context).nonzero(as_tuple=True)
+            if len(matches) > 1:
+                seq_idx = matches[1]
+            else:
+                seq_idx = matches[0]
+            vstart = seq_idx.min().item()
+            vend = seq_idx.max().item() + 1
+
+        else:
+            vs_id  = self.model.config.vision_start_token_id       # e.g., 151652
+            ve_id  = self.model.config.vision_end_token_id         # e.g., 151653
+            vstart = input_ids[0].tolist().index(vs_id)
+            vend = torch.where(input_ids[0] == ve_id)[0].max().item()
 
         visual_alpha = getattr(generation_config, 'visual_alpha', 0.0)
 
@@ -148,9 +171,23 @@ def _sample_vgd(
 
         # Register hook on the first layer of the model
         hooks = []
-        for i, layer in enumerate(self.model.language_model.layers):
-            hook = VisualZeroHook(vstart + 1, vend, expand=False)
-            hooks.append(layer.register_forward_pre_hook(hook))
+        
+        layers = None
+        if hasattr(self, 'language_model'):
+             if hasattr(self.language_model, 'model'):
+                 layers = self.language_model.model.layers
+             elif hasattr(self.language_model, 'layers'):
+                 layers = self.language_model.layers
+        elif hasattr(self, 'model'):
+             if hasattr(self.model, 'layers'):
+                 layers = self.model.layers
+             elif hasattr(self.model, 'language_model'):
+                 layers = self.model.language_model.layers
+        
+        if layers is not None:
+            for i, layer in enumerate(layers):
+                hook = VisualZeroHook(vstart + 1, vend, expand=False)
+                hooks.append(layer.register_forward_pre_hook(hook))
 
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             forward_call = self if is_prefill else model_forward
@@ -426,7 +463,38 @@ def _sample(
         else:
             return input_ids
 
+_original_validate_model_kwargs = GenerationMixin._validate_model_kwargs
+
+def _validate_model_kwargs_vgd(self, model_kwargs: Dict[str, Any]):
+    # Keys to ignore during validation to prevent ValueError in transformers
+    ignore_keys = {
+        'visual_alpha', 'verbose', 'reuse', 'use_custom_prompt', 
+        'use_vllm', 'presence_penalty', 'repetition_penalty', 'top_p', 'top_k',
+        'vgd_input_ids'
+    }
+    
+    # Temporarily remove custom keys so validation passes
+    removed = {}
+    for k in list(model_kwargs.keys()):
+        if k in ignore_keys:
+            removed[k] = model_kwargs.pop(k)
+            
+    try:
+        # The original function modifies model_kwargs in-place and returns None
+        output = _original_validate_model_kwargs(self, model_kwargs)
+    finally:
+        # Restore custom keys so they are available for VGD hook/sampling
+        model_kwargs.update(removed)
+        
+    # FIX: Only update output if it is actually a dictionary (some older/custom versions might return a new dict)
+    if output is not None and isinstance(output, dict) and output is not model_kwargs:
+        output.update(removed)
+        return output
+        
+    return model_kwargs
+
 def evolve_guidance_sampling(temperature=1.0, do_sample=True, visual_alpha=1.0):
+    transformers.generation.utils.GenerationMixin._validate_model_kwargs = _validate_model_kwargs_vgd
     if temperature > 0 and do_sample and visual_alpha > 0:
         print("Using Visual Guidance Sampling")
         transformers.generation.utils.GenerationMixin._sample = _sample_vgd
