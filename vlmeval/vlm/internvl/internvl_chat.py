@@ -136,6 +136,7 @@ def vgd_generate(
         input_ids = input_ids.reshape(B, N)
     else:
         input_embeds = self.language_model.get_input_embeddings()(input_ids)
+
     outputs = self.language_model.generate(
         inputs_embeds=input_embeds,
         attention_mask=attention_mask,

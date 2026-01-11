@@ -181,6 +181,7 @@ class Gemma3(BaseModel):
         return processed_message, images
 
     def generate_inner_transformers(self, message, dataset=None):
+        message.append({'type': 'text', 'value': 'Answer strictly with the correct option letter (A, B, C, D) or Yes/No. Do not provide any explanation.\n'})
         messages = self.message2pipeline(message)
         inputs = self.processor.apply_chat_template(
             messages, add_generation_prompt=True, tokenize=True,
