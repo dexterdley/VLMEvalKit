@@ -221,9 +221,9 @@ You can launch the evaluation by setting either --data and --model or --config.
     parser.add_argument('--verbose', action='store_true')
     # Configuration for Resume
     # Ignore: will not rerun failed VLM inference
-    parser.add_argument('--ignore', action='store_true', help='Ignore failed indices. ')
+    parser.add_argument('--ignore', default=True, help='Ignore failed indices. ')
     # Reuse: will reuse the existing prediction files
-    parser.add_argument('--reuse', action='store_true')
+    parser.add_argument('--reuse', default=False)
     # Reuse-aux: if set, when reuse is True, will also reuse the auxiliary evaluation files
     parser.add_argument('--reuse-aux', type=bool, default=False, help='reuse auxiliary evaluation files')
     parser.add_argument(

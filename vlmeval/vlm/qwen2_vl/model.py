@@ -192,6 +192,8 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         post_process: bool = False,  # if True, will try to only extract stuff in the last \boxed{}.
         verbose: bool = False,
         use_audio_in_video: bool = False,
+        do_sample: bool = False, # added
+        visual_alpha: float = 1.0, # added
         **kwargs,
     ):
         super().__init__(use_custom_prompt=use_custom_prompt)
@@ -221,6 +223,9 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         self.FRAME_FACTOR = 2
         assert model_path is not None
         self.model_path = model_path
+        self.temperature = temperature
+        self.do_sample = do_sample # added
+        self.visual_alpha = visual_alpha
         MODEL_CLS = None
 
         if listinstr(['omni'], model_path.lower()):
@@ -291,7 +296,11 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 model_path, torch_dtype='auto', device_map="auto", attn_implementation='flash_attention_2'
             )
             self.model.eval()
-
+            
+            ### Start of additions ###
+            if self.visual_alpha > 0 and not self.use_vllm:
+                self.model.generation_config.visual_alpha = self.visual_alpha
+            ### End of additions ###
         torch.cuda.empty_cache()
 
     def _prepare_content(self, inputs: list[dict[str, str]], dataset: str | None = None) -> list[dict[str, str]]:
@@ -452,6 +461,7 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         messages = []
         if self.system_prompt is not None:
             messages.append({'role': 'system', 'content': self.system_prompt})
+        message.append({'type': 'text', 'value': 'Answer strictly with the correct option letter (A, B, C, D) or Yes/No. Do not provide any explanation.\n'})
         messages.append({'role': 'user', 'content': self._prepare_content(message, dataset=dataset)})
         if self.verbose:
             print(f'\033[31m{messages}\033[0m')

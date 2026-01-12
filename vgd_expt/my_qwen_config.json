@@ -18,7 +18,10 @@
 
     "data": {
         "MMStar": {},
-        "MME": {}
-        
+        "MME": {},
+        "ScienceQA_VAL": {},
+        "RealWorldQA": {},
+        "BLINK": {},
+        "HallusionBench": {}
     }
 }
