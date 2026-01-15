@@ -191,13 +191,12 @@ def _sample_vgd(
                  layers = self.model.language_model.layers
         
         if layers is not None:
-            hook = VisualZeroHook(vstart, vend, expand=False)
-            hooks.append(layers[0].register_forward_pre_hook(hook))
-            '''
+            #hook = VisualZeroHook(vstart, vend, expand=False)
+            #hooks.append(layers[0].register_forward_pre_hook(hook))
             for i, layer in enumerate(layers):
                 hook = VisualZeroHook(vstart, vend, expand=False)
                 hooks.append(layer.register_forward_pre_hook(hook))
-            '''
+            
 
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
             forward_call = self if is_prefill else model_forward
