@@ -150,22 +150,12 @@ def _sample_vgd(
             vstart = input_ids[0].tolist().index(vs_id)
             vend = torch.where(input_ids[0] == ve_id)[0].max().item()
 
-            # Expand inputs for VGD (Batch size 1 -> 2) to avoid shape mismatch in Qwen3-VL internals
-            if input_ids.shape[0] == 1:
-                input_ids = input_ids.repeat(2, 1)
-                new_kwargs = {}
-                for k, v in model_kwargs.items():
-                    if isinstance(v, torch.Tensor) and (v.shape[0] == 1 or k in ["pixel_values", "image_grid_thw", "pixel_values_videos", "video_grid_thw"]):
-                        new_kwargs[k] = v.repeat(2, *([1] * (v.ndim - 1)))
-                    else:
-                        new_kwargs[k] = v
-                model_kwargs = new_kwargs
-
         if 'visual_alpha' in model_kwargs:
             visual_alpha = model_kwargs['visual_alpha']
         else:
             visual_alpha = getattr(generation_config, 'visual_alpha', 0.0)
         
+        # Expand inputs for VGD (Batch size 1 -> 2) to avoid shape mismatch in Qwen3-VL internals
         if input_ids.shape[0] == 1:
             input_ids = input_ids.repeat(2, 1)
             new_kwargs = {}
@@ -191,11 +181,11 @@ def _sample_vgd(
                  layers = self.model.language_model.layers
         
         if layers is not None:
-            #hook = VisualZeroHook(vstart, vend, expand=False)
-            #hooks.append(layers[0].register_forward_pre_hook(hook))
-            for i, layer in enumerate(layers):
-                hook = VisualZeroHook(vstart, vend, expand=False)
-                hooks.append(layer.register_forward_pre_hook(hook))
+            hook = VisualZeroHook(vstart + 1, vend, expand=False)
+            hooks.append(layers[0].register_forward_pre_hook(hook))
+            #for i, layer in enumerate(layers):
+            #    hook = VisualZeroHook(vstart, vend, expand=False)
+            #    hooks.append(layer.register_forward_pre_hook(hook))
             
 
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):

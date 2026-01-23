@@ -20,8 +20,6 @@
         "MMStar": {},
         "MME": {},
         "ScienceQA_VAL": {},
-        "RealWorldQA": {},
-        "BLINK": {},
-        "HallusionBench": {}
+        "RealWorldQA": {}
     }
 }
