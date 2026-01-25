@@ -64,7 +64,7 @@ class VisualZeroHook:
         else:
             B = hidden_states.shape[0]
             half = B // 2
-            hidden_states[half:, self.start:self.end, :].zero_()
+            hidden_states[half:, self.start:self.end, :] = 0
         return (hidden_states,) + args[1:]
 
 def _sample_vgd(
@@ -181,7 +181,7 @@ def _sample_vgd(
                  layers = self.model.language_model.layers
         
         if layers is not None:
-            hook = VisualZeroHook(vstart + 1, vend, expand=False)
+            hook = VisualZeroHook(vstart, vend, expand=False)
             hooks.append(layers[0].register_forward_pre_hook(hook))
             #for i, layer in enumerate(layers):
             #    hook = VisualZeroHook(vstart, vend, expand=False)
