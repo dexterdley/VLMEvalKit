@@ -200,7 +200,7 @@ def _sample_vgd(
 
             # VGD Logic: Uncond + alpha * (Cond - Uncond)
             vgd_logits = next_token_logits_no_v + visual_alpha * (next_token_logits - next_token_logits_no_v)
-            next_token_scores = logits_processor(input_ids[0:1], vgd_logits)
+            next_token_scores = logits_processor(input_ids, vgd_logits)
 
             if is_prefill:
                 is_prefill = False

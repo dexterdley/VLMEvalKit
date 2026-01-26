@@ -37,7 +37,6 @@ do
 done
 echo "✅ Evaluations Completed."
 
-
 INTERN_MODEL="InternVL3_5-2B"
 cat outputs/${INTERN_MODEL}/${INTERN_MODEL}_Base/${INTERN_MODEL}/${INTERN_MODEL}_MMStar_acc.csv
 cat outputs/${INTERN_MODEL}/${INTERN_MODEL}_Base/${INTERN_MODEL}/${INTERN_MODEL}_MME_score.csv

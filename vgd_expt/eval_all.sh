@@ -10,13 +10,14 @@ MODELS=(
   "Qwen2.5-VL-7B-Instruct"
   "InternVL3_5-2B"
   #"Gemma3-4B"
+  #"InternVL3_5-8B"
 )
 for MODEL in "${MODELS[@]}"
 do
     mkdir -p ./outputs/${MODEL}
 
     #rm -rf ./outputs/${MODEL}/${MODEL}_Base/
-    #rm -rf ./outputs/${MODEL}/${MODEL}_VGD/
+    rm -rf ./outputs/${MODEL}/${MODEL}_VGD/
 
     echo "🚀 Starting Distributed Parallel Evaluations. $MODEL"
     '''
