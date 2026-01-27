@@ -17,9 +17,6 @@
     }, 
 
     "data": {
-        "MMStar": {},
-        "MME": {},
-        "ScienceQA_VAL": {},
-        "RealWorldQA": {}
+        "MME": {}
     }
 }

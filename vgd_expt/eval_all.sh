@@ -7,10 +7,10 @@ MODELS=(
   #Qwen3-VL-8B-Thinking
   #"Qwen3-VL-2B-Instruct"
   "Qwen3-VL-8B-Instruct"
-  "Qwen2.5-VL-7B-Instruct"
-  "InternVL3_5-2B"
-  #"Gemma3-4B"
-  #"InternVL3_5-8B"
+  #"Qwen2.5-VL-7B-Instruct"
+  #"InternVL3_5-2B"
+  "Gemma3-4B"
+  "InternVL3_5-8B"
 )
 for MODEL in "${MODELS[@]}"
 do
@@ -20,7 +20,7 @@ do
     rm -rf ./outputs/${MODEL}/${MODEL}_VGD/
 
     echo "🚀 Starting Distributed Parallel Evaluations. $MODEL"
-    '''
+    
     CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
       --nproc_per_node=4 \
       --master_port=29500 \
@@ -30,7 +30,7 @@ do
       --model=${MODEL} \
       --work-dir ./outputs/${MODEL}/${MODEL}_Base \
       >> ./outputs/${MODEL}/${MODEL}_Base.txt &
-    '''
+    
     CUDA_VISIBLE_DEVICES=4,5,6,7 torchrun \
       --nproc_per_node=4 \
       --master_port=29501 \

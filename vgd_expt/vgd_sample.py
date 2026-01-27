@@ -64,7 +64,7 @@ class VisualZeroHook:
         else:
             B = hidden_states.shape[0]
             half = B // 2
-            hidden_states[half:, self.start:self.end, :] = 0
+            hidden_states[half:, self.start:self.end, :].zero_()
         return (hidden_states,) + args[1:]
 
 def _sample_vgd(
@@ -133,7 +133,7 @@ def _sample_vgd(
             vstart = input_ids[0].tolist().index(vs_id)
             vend = torch.where(input_ids[0] == ve_id)[0].max().item()
 
-        elif "Qwen3" in type(self.model.config).__name__ and 'vgd_input_ids' in model_kwargs:
+        elif "Qwen3" in type(self.model.config).__name__ and 'vgd_input_ids' in model_kwargs: #INTERN-VL BRANCH
             current_input_ids = model_kwargs['vgd_input_ids']
             img_context = getattr(self, 'img_context_token_id', 151671)
             matches = (current_input_ids == img_context).nonzero(as_tuple=True)
@@ -147,7 +147,7 @@ def _sample_vgd(
         else:
             vs_id  = self.model.config.vision_start_token_id       # e.g., 151652
             ve_id  = self.model.config.vision_end_token_id         # e.g., 151653
-            vstart = input_ids[0].tolist().index(vs_id)
+            vstart = input_ids[0].tolist().index(vs_id) + 1
             vend = torch.where(input_ids[0] == ve_id)[0].max().item()
 
         if 'visual_alpha' in model_kwargs:
@@ -165,7 +165,7 @@ def _sample_vgd(
                 else:
                     new_kwargs[k] = v
             model_kwargs = new_kwargs
-        
+
         # Register hook on the first layer of the model
         hooks = []
         layers = None
@@ -179,13 +179,15 @@ def _sample_vgd(
                  layers = self.model.layers
              elif hasattr(self.model, 'language_model'):
                  layers = self.model.language_model.layers
-        
+
         if layers is not None:
-            hook = VisualZeroHook(vstart, vend, expand=False)
-            hooks.append(layers[0].register_forward_pre_hook(hook))
-            #for i, layer in enumerate(layers):
-            #    hook = VisualZeroHook(vstart, vend, expand=False)
-            #    hooks.append(layer.register_forward_pre_hook(hook))
+            if "Qwen3VL" in type(self.model.config).__name__:
+                for i, layer in enumerate(layers):
+                    hook = VisualZeroHook(vstart, vend, expand=False)
+                    hooks.append(layer.register_forward_pre_hook(hook))
+            else:
+                hook = VisualZeroHook(vstart, vend, expand=False)
+                hooks.append(layers[0].register_forward_pre_hook(hook))
             
 
         while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
@@ -200,7 +202,7 @@ def _sample_vgd(
 
             # VGD Logic: Uncond + alpha * (Cond - Uncond)
             vgd_logits = next_token_logits_no_v + visual_alpha * (next_token_logits - next_token_logits_no_v)
-            next_token_scores = logits_processor(input_ids, vgd_logits)
+            next_token_scores = logits_processor(input_ids[:1], vgd_logits)
 
             if is_prefill:
                 is_prefill = False
