@@ -1,6 +1,6 @@
 {
     "model": {
-        "MiniCPM-V-2_6": {
+        "Qwen3-VL-8B-Instruct": {
             "max_new_tokens": 512,
             "temperature": 1.0,
             "do_sample": true,
@@ -17,6 +17,6 @@
     }, 
 
     "data": {
-        "MME": {}
+        "MMBench_Video_8frame_nopack": {}
     }
 }
