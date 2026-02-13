@@ -229,14 +229,15 @@ You can launch the evaluation by setting either --data and --model or --config.
     parser.add_argument(
         '--use-vllm', action='store_true', help='use vllm to generate, the flag is only supported in Llama4 for now')
     parser.add_argument('--use-verifier', action='store_true', help='use verifier to evaluate')
-    parser.add_argument('--visual_alpha', type=float, default=1.0, help='Visual Alpha for Guidance')
+    parser.add_argument('--seed', type=int, default=42, help='Random Seed')
+    parser.add_argument('--visual_alpha', type=float, default=0.0, help='Visual Alpha for Guidance')
+    parser.add_argument('--vcd_alpha', type=float, default=0.0, help='Alpha for VCD')
     args = parser.parse_args()
     return args
 
 
-def main():
+def main(args):
     logger = get_logger('RUN')
-    args = parse_args()
     use_config, cfg = False, None
     if args.config is not None:
         assert args.data is None, '--data should not be set when using --config'
@@ -290,8 +291,9 @@ def main():
             cfg['model'][args.model[0]] = model_cfg_params
 
             model_cfg = cfg['model'][model_name]
-            evolve_guidance_sampling(model_cfg.get('temperature', 1.0), model_cfg.get('do_sample', True), args.visual_alpha)
+            evolve_guidance_sampling(model_cfg.get('temperature', 1.0), model_cfg.get('do_sample', True), args.visual_alpha, args.vcd_alpha)
             model_cfg['visual_alpha'] = args.visual_alpha
+            model_cfg['vcd_alpha'] = args.vcd_alpha
 
         date, commit_id = timestr('day'), githash(digits=8)
         eval_id = f"T{date}_G{commit_id}"
@@ -551,5 +553,6 @@ def main():
 
 if __name__ == '__main__':
     load_env()
-    set_seed(42)
-    main()
+    args = parse_args()
+    set_seed(args.seed)
+    main(args)

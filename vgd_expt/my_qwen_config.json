@@ -1,7 +1,7 @@
 {
     "model": {
-        "Qwen3-VL-8B-Instruct": {
-            "max_new_tokens": 512,
+        "Qwen3-VL-4B-Thinking": {
+            "max_new_tokens": 1024,
             "temperature": 1.0,
             "do_sample": true,
             "verbose": false,
@@ -17,6 +17,9 @@
     }, 
 
     "data": {
-        "MMBench_Video_8frame_nopack": {}
+        "MMStar": {},
+        "MME": {},
+        "ScienceQA_VAL": {},
+        "RealWorldQA": {}
     }
 }

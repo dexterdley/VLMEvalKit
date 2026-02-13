@@ -6,33 +6,39 @@ export SPLIT_THINK=True
 
 MODELS=(
   #Qwen3-VL-2B-Thinking
+  Qwen3-VL-4B-Thinking
   #Qwen3-VL-8B-Thinking
   #"Qwen3-VL-2B-Instruct"
-  "Qwen3-VL-8B-Instruct"
+  #"Qwen3-VL-8B-Instruct"
   #"Qwen2.5-VL-7B-Instruct"
   #"InternVL3_5-2B"
   #"Gemma3-4B"
 )
-for MODEL in "${MODELS[@]}"
+for SEED in 42 55 69
 do
-    mkdir -p ./outputs/${MODEL}
+  for MODEL in "${MODELS[@]}"
+  do
+      mkdir -p ./outputs/${MODEL}
+      rm -rf ./outputs/${MODEL}/${MODEL}_Reasoning_${SEED}/
 
-    #rm -rf ./outputs/${MODEL}/${MODEL}_Base/
-    #rm -rf ./outputs/${MODEL}/${MODEL}_VGD/
+      for ALPHA in 0 1.25 1.5 1.75 2.0 2.5
+      do
+        echo "🚀 Starting Distributed Parallel Evaluations. Model: $MODEL | Alpha: $ALPHA | Seed: $SEED"
 
-    echo "🚀 Starting Distributed Parallel Evaluations. $MODEL"
+        CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 torchrun \
+          --nproc_per_node=6 \
+          --master_port=29502 \
+          ./vgd_expt/run_vgd.py \
+          --config ./vgd_expt/my_qwen_config.json \
+          --visual_alpha=$ALPHA \
+          --model=${MODEL} \
+          --seed=${SEED} \
+          --work-dir ./outputs/${MODEL}/${MODEL}_Reasoning_${SEED} \
+          >> ./outputs/${MODEL}/${MODEL}_Reasoning_${SEED}.txt &
 
-    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 torchrun \
-      --nproc_per_node=8 \
-      --master_port=29501 \
-      ./vgd_expt/run_vgd.py \
-      --config ./vgd_expt/my_qwen_config.json \
-      --visual_alpha=2 \
-      --model=${MODEL} \
-      --work-dir ./outputs/${MODEL}/${MODEL}_VGD \
-      >> ./outputs/${MODEL}/${MODEL}_VGD.txt &
-
-      wait     
-      echo "✅ Finished $MODEL"
+          wait     
+          echo "✅ Finished $MODEL"
+        done
+    done
 done
-echo "✅ Evaluations Completed."
+echo "✅ Evaluations on Reasoning Completed."
