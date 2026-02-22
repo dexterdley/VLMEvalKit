@@ -50,7 +50,6 @@ class VisualZeroHook:
     def __init__(self, start_idx, end_idx):
         self.start = start_idx
         self.end = end_idx
-        self.expand = expand
 
     def __call__(self, module, args):
         hidden_states = args[0]
@@ -62,13 +61,16 @@ class VisualZeroHook:
         hidden_states[half:, self.start:self.end, :].zero_()
         return (hidden_states,) + args[1:]
 
-class VisualDistortionHook:
+class VisualTextDistortionHook:
     """
-    Hook to add Gaussian noise to visual embeddings for VCD (Visual Contrastive Decoding).
+    Hook to add Gaussian noise to embeddings for variants of the following algos.
+    "vis" for VCD (Visual Contrastive Decoding)
+    "text for ICD (Instruction Contrastive Decoding)
     """
-    def __init__(self, start_idx, end_idx, noise_scale=0.1):
+    def __init__(self, start_idx, end_idx, noise_type="vis", noise_scale=0.1):
         self.start = start_idx
         self.end = end_idx
+        self.noise_type = noise_type
         self.noise_scale = noise_scale
 
     def __call__(self, module, args):
@@ -78,8 +80,18 @@ class VisualDistortionHook:
 
         B = hidden_states.shape[0]
         half = B // 2
-        noise = torch.randn_like(hidden_states[half:, self.start:self.end, :]) * self.noise_scale
-        hidden_states[half:, self.start:self.end, :] += noise
+        if self.noise_type == "vis":
+            noise = torch.randn_like(hidden_states[half:, self.start:self.end, :]) * self.noise_scale
+            hidden_states[half:, self.start:self.end, :] += noise
+
+        elif self.noise_type == "text":
+            # 1. Text before image (Prefix/System prompts)
+            noise_pre = torch.randn_like(hidden_states[half:, :self.start, :]) * self.noise_scale
+            hidden_states[half:, :self.start, :] += noise_pre
+                
+            # 2. Text after image (User instructions/Suffix)
+            noise_post = torch.randn_like(hidden_states[half:, self.end:, :]) * self.noise_scale
+            hidden_states[half:, self.end:, :] += noise_post
         return (hidden_states,) + args[1:]
 
 def _sample_vgd(
@@ -309,7 +321,7 @@ def _sample_vgd(
         else:
             return input_ids
 
-def _sample_vcd(
+def _sample_contrastive(
         self,
         input_ids: torch.LongTensor,
         logits_processor: LogitsProcessorList,
@@ -396,7 +408,20 @@ def _sample_vcd(
             vcd_alpha = model_kwargs['vcd_alpha']
         else:
             vcd_alpha = getattr(generation_config, 'vcd_alpha', 0.0)
-        
+
+        if 'icd_alpha' in model_kwargs:
+            icd_alpha = model_kwargs['icd_alpha']
+        else:
+            icd_alpha = getattr(generation_config, 'icd_alpha', 0.0)
+
+        if vcd_alpha > 0:
+            noise_type = "vis"
+            alpha = vcd_alpha
+
+        elif icd_alpha > 0:
+            noise_type = "text"
+            alpha = icd_alpha
+
         # Expand inputs (Batch size 1 -> 2) to avoid shape mismatch in Qwen3-VL internals
         if input_ids.shape[0] == 1:
             input_ids = input_ids.repeat(2, 1)
@@ -425,10 +450,10 @@ def _sample_vcd(
         if layers is not None:
             if "Qwen3VL" in type(self.model.config).__name__:
                 for i, layer in enumerate(layers):
-                    hook = VisualDistortionHook(vstart, vend, noise_scale=0.1)
+                    hook = VisualTextDistortionHook(vstart, vend, noise_type=noise_type, noise_scale=0.1)
                     hooks.append(layer.register_forward_pre_hook(hook))
             else:
-                hook = VisualDistortionHook(vstart, vend, noise_scale=0.1)
+                hook = VisualTextDistortionHook(vstart, vend, noise_type=noise_type, noise_scale=0.1)
                 hooks.append(layers[0].register_forward_pre_hook(hook))
             
 
@@ -442,10 +467,10 @@ def _sample_vcd(
             next_token_logits_clean = outputs.logits[:, -1, :][0].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
             next_token_logits_distorted = outputs.logits[:, -1, :][1].unsqueeze(0).to(copy=True, dtype=torch.float32, device=input_ids.device)
 
-            # --- VCD Logic ---
-            # VCD Formula: Logits = (1 + alpha) * Logits_Clean - alpha * Logits_Distorted
-            vcd_logits = (1 + vcd_alpha) * next_token_logits_clean - vcd_alpha * next_token_logits_distorted
-            next_token_scores = logits_processor(input_ids[:1], vcd_logits)
+            # --- CD Logic ---
+            # CD Formula: Logits = (1 + alpha) * Logits_Clean - alpha * Logits_Distorted
+            cd_logits = (1 + alpha) * next_token_logits_clean - alpha * next_token_logits_distorted
+            next_token_scores = logits_processor(input_ids[:1], cd_logits)
 
             if is_prefill:
                 is_prefill = False
@@ -535,6 +560,185 @@ def _sample_vcd(
                 )
         else:
             return input_ids
+
+def _beam_search_opera(
+        self,
+        input_ids: torch.LongTensor,
+        logits_processor: LogitsProcessorList,
+        stopping_criteria: StoppingCriteriaList,
+        generation_config: GenerationConfig,
+        synced_gpus: bool = False,
+        streamer: Optional["BaseStreamer"] = None,
+        **model_kwargs,
+    ) -> Union[SampleOutput, torch.LongTensor]:
+
+    # 1. Setup OPERA configuration
+    # opera_alpha controls the strength of the penalty
+    opera_alpha = model_kwargs.get('opera_alpha', getattr(generation_config, 'opera_alpha', 0.0))
+    # opera_scale scales the raw attention weights before applying alpha
+    opera_scale = model_kwargs.get('opera_scale', getattr(generation_config, 'opera_scale', 50.0))
+
+    # init values
+    pad_token_id = generation_config._pad_token_tensor
+    # OPERA requires attentions to calculate penalties
+    generation_config.output_attentions = True 
+    
+    output_attentions = True
+    output_hidden_states = generation_config.output_hidden_states
+    output_scores = generation_config.output_scores
+    output_logits = generation_config.output_logits
+    return_dict_in_generate = generation_config.return_dict_in_generate
+    has_eos_stopping_criteria = any(hasattr(criteria, "eos_token_id") for criteria in stopping_criteria)
+    do_sample = generation_config.do_sample
+
+    scores = () if (return_dict_in_generate and output_scores) else None
+    raw_logits = () if (return_dict_in_generate and output_logits) else None
+    decoder_attentions = () if (return_dict_in_generate and output_attentions) else None
+    cross_attentions = () if (return_dict_in_generate and output_attentions) else None
+    decoder_hidden_states = () if (return_dict_in_generate and output_hidden_states) else None
+
+    if return_dict_in_generate and self.config.is_encoder_decoder:
+        encoder_attentions = model_kwargs["encoder_outputs"].get("attentions") if output_attentions else None
+        encoder_hidden_states = (
+            model_kwargs["encoder_outputs"].get("hidden_states") if output_hidden_states else None
+        )
+
+    batch_size, cur_len = input_ids.shape[:2]
+    this_peer_finished = False
+    unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=input_ids.device)
+    model_kwargs = self._get_initial_cache_position(cur_len, input_ids.device, model_kwargs)
+
+    model_forward = self.__call__
+    compile_forward = self._valid_auto_compile_criteria(model_kwargs, generation_config)
+    
+    # Disable compilation for OPERA if it relies on specific attention output structures that might break in graphs
+    if compile_forward and opera_alpha > 0:
+         generation_config.compile_config.fullgraph = False
+         
+    if compile_forward:
+        os.environ["TOKENIZERS_PARALLELISM"] = "0"
+        if self.config._attn_implementation == "flash_attention_2":
+            generation_config.compile_config.fullgraph = False
+        model_forward = self.get_compiled_call(generation_config.compile_config)
+
+    if generation_config.prefill_chunk_size is not None:
+        model_kwargs = self._prefill_chunking(input_ids, generation_config, **model_kwargs)
+        is_prefill = False
+    else:
+        is_prefill = True
+
+    while self._has_unfinished_sequences(this_peer_finished, synced_gpus, device=input_ids.device):
+        forward_call = self if is_prefill else model_forward
+        model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+
+        # Force output_attentions=True for OPERA
+        outputs = forward_call(**model_inputs, return_dict=True, output_attentions=True)
+        
+        next_token_logits = outputs.logits[:, -1, :].to(copy=True, dtype=torch.float32, device=input_ids.device)
+
+        # --- OPERA Logic ---
+        if opera_alpha > 0 and outputs.attentions is not None:
+            # 1. Get Attention Map from the last layer
+            # Shape: [Batch, Heads, QueryLen(1), KeyLen(Total)]
+            # We use the last layer's attention as a proxy for the model's current focus
+            last_layer_attn = outputs.attentions[-1] 
+            
+            # 2. Aggregate over heads (Max pooling is often used in OPERA to find peak attention)
+            # Shape: [Batch, TotalLen]
+            # Squeeze query dim (1)
+            attn_weights = last_layer_attn.max(dim=1).values[:, -1, :] 
+
+            # 3. Compute Penalty
+            # We penalize the logits of tokens that the model is currently attending to strongly.
+            # This prevents the model from getting stuck in a loop of attending to the same token and generating it again.
+            
+            penalty = torch.zeros_like(next_token_logits)
+            
+            for b in range(batch_size):
+                # Get the sequence history indices
+                hist_ids = input_ids[b]
+                
+                # Align weights with history (handle KV cache length differences)
+                curr_seq_len = hist_ids.shape[0]
+                curr_attn_len = attn_weights.shape[1]
+                
+                # We only care about the intersection of valid history and weights
+                valid_len = min(curr_seq_len, curr_attn_len)
+                
+                # Extract relevant weights and IDs
+                # We look at the most recent 'valid_len' tokens
+                valid_weights = attn_weights[b, -valid_len:]
+                valid_ids = hist_ids[-valid_len:]
+                
+                # Normalize weights (Softmax or Simple Scaling) to make alpha meaningful
+                # Using simple scaling based on OPERA reference intuition
+                # High attention weight -> High penalty on that token ID
+                norm_weights = valid_weights / (valid_weights.max() + 1e-6)
+                norm_weights = norm_weights * opera_scale
+
+                # Scatter Add: Accumulate penalties on token IDs
+                # If the model attends to token ID 'X' at multiple positions, add up the penalties.
+                penalty[b].scatter_add_(0, valid_ids, norm_weights)
+
+            # 4. Apply Penalty
+            # Logits = Logits - alpha * Penalty
+            next_token_logits = next_token_logits - (opera_alpha * penalty)
+
+        # -------------------
+
+        next_token_scores = logits_processor(input_ids, next_token_logits)
+
+        if is_prefill:
+            is_prefill = False
+        
+        if synced_gpus and this_peer_finished:
+            continue
+
+        if return_dict_in_generate:
+            if output_scores: scores += (next_token_scores,)
+            if output_logits: raw_logits += (next_token_logits,)
+            if output_attentions:
+                decoder_attentions += ((outputs.decoder_attentions,) if self.config.is_encoder_decoder else (outputs.attentions,))
+            if output_hidden_states:
+                decoder_hidden_states += ((outputs.decoder_hidden_states,) if self.config.is_encoder_decoder else (outputs.hidden_states,))
+
+        if do_sample:
+            probs = nn.functional.softmax(next_token_scores, dim=-1)
+            next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+        else:
+            next_tokens = torch.argmax(next_token_scores, dim=-1)
+
+        if has_eos_stopping_criteria:
+            next_tokens = next_tokens * unfinished_sequences + pad_token_id * (1 - unfinished_sequences)
+
+        input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
+        if streamer is not None:
+            streamer.put(next_tokens.cpu())
+
+        model_kwargs = self._update_model_kwargs_for_generation(
+            outputs, model_kwargs, is_encoder_decoder=self.config.is_encoder_decoder
+        )
+
+        unfinished_sequences = unfinished_sequences & ~stopping_criteria(input_ids, scores)
+        this_peer_finished = unfinished_sequences.max() == 0
+        cur_len += 1
+        
+        del outputs
+
+    if streamer is not None:
+        streamer.end()
+
+    if return_dict_in_generate:
+        return GenerateDecoderOnlyOutput(
+            sequences=input_ids,
+            scores=scores,
+            logits=raw_logits,
+            attentions=decoder_attentions,
+            hidden_states=decoder_hidden_states,
+            past_key_values=model_kwargs.get("past_key_values"),
+        )
+    else:
+        return input_ids
 
 def _sample(
         self,
@@ -701,24 +905,22 @@ _original_validate_model_kwargs = GenerationMixin._validate_model_kwargs
 def _validate_model_kwargs_vgd(self, model_kwargs: Dict[str, Any]):
     # Keys to ignore during validation to prevent ValueError in transformers
     ignore_keys = {
-        'visual_alpha','vcd_alpha', 'verbose', 'reuse', 'use_custom_prompt', 
+        'visual_alpha','vcd_alpha', 'icd_alpha', 'verbose', 'reuse', 'use_custom_prompt',
+        'opera_alpha', 'opera_scale', # Added OPERA keys
         'use_vllm', 'presence_penalty', 'repetition_penalty', 'top_p', 'top_k',
         'vgd_input_ids'
     }
-    
     # Temporarily remove custom keys so validation passes
     removed = {}
     for k in list(model_kwargs.keys()):
         if k in ignore_keys:
             removed[k] = model_kwargs.pop(k)
-            
     try:
         # The original function modifies model_kwargs in-place and returns None
         output = _original_validate_model_kwargs(self, model_kwargs)
     finally:
         # Restore custom keys so they are available for VGD hook/sampling
         model_kwargs.update(removed)
-        
     # FIX: Only update output if it is actually a dictionary (some older/custom versions might return a new dict)
     if output is not None and isinstance(output, dict) and output is not model_kwargs:
         output.update(removed)
@@ -726,14 +928,27 @@ def _validate_model_kwargs_vgd(self, model_kwargs: Dict[str, Any]):
         
     return model_kwargs
 
-def evolve_guidance_sampling(temperature=1.0, do_sample=True, visual_alpha=1.0, vcd_alpha=1.0):
+def evolve_guidance_sampling(temperature=1.0, do_sample=True, 
+                             visual_alpha=0.0, vcd_alpha=0.0, icd_alpha=0.0, 
+                             opera_alpha=0.0, opera_scale=50.0):
+    
     transformers.generation.utils.GenerationMixin._validate_model_kwargs = _validate_model_kwargs_vgd
-    if temperature > 0 and do_sample and visual_alpha > 0 and vcd_alpha==0:
-        print("Using Visual Guidance Sampling")
-        transformers.generation.utils.GenerationMixin._sample = _sample_vgd
-    elif temperature > 0 and do_sample and vcd_alpha > 0 and visual_alpha==0:
-        print("Using VCD Sampling")
-        transformers.generation.utils.GenerationMixin._sample = _sample_vcd
-    else:
-        print("Using Regular Sampling")
-        transformers.generation.utils.GenerationMixin._sample = _sample
+    
+    if opera_alpha > 0:
+        # OPERA is a Beam Search strategy, so we patch beam_search, not _sample
+        print(f"Using OPERA Beam Search | Alpha: {opera_alpha} | Scale: {opera_scale}")
+        transformers.generation.utils.GenerationMixin.beam_search = _beam_search_opera
+        
+    elif temperature > 0 and do_sample:
+        if visual_alpha > 0:
+            print(f"Using Visual Guidance Sampling | Alpha: {visual_alpha}")
+            transformers.generation.utils.GenerationMixin._sample = _sample_vgd
+        elif vcd_alpha > 0:
+            print(f"Using VCD Sampling | Alpha: {vcd_alpha}")
+            transformers.generation.utils.GenerationMixin._sample = _sample_contrastive
+        elif icd_alpha > 0:
+            print(f"Using ICD Sampling | Alpha: {icd_alpha}")
+            transformers.generation.utils.GenerationMixin._sample = _sample_contrastive
+        else:
+            print("Using Regular Sampling")
+            transformers.generation.utils.GenerationMixin._sample = _sample

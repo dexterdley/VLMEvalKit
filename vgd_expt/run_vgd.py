@@ -232,6 +232,9 @@ You can launch the evaluation by setting either --data and --model or --config.
     parser.add_argument('--seed', type=int, default=42, help='Random Seed')
     parser.add_argument('--visual_alpha', type=float, default=0.0, help='Visual Alpha for Guidance')
     parser.add_argument('--vcd_alpha', type=float, default=0.0, help='Alpha for VCD')
+    parser.add_argument('--icd_alpha', type=float, default=0.0, help='Alpha for ICD')
+    parser.add_argument('--opera_alpha', type=float, default=0.0, help='Alpha for OPERA')
+    parser.add_argument('--opera_scale', type=float, default=0.0, help='Scale for OPERA')
     args = parser.parse_args()
     return args
 
@@ -289,11 +292,21 @@ def main(args):
             old_model_name = list(cfg['model'].keys())[0]
             model_cfg_params = cfg['model'].pop(old_model_name)
             cfg['model'][args.model[0]] = model_cfg_params
-
             model_cfg = cfg['model'][model_name]
-            evolve_guidance_sampling(model_cfg.get('temperature', 1.0), model_cfg.get('do_sample', True), args.visual_alpha, args.vcd_alpha)
+            evolve_guidance_sampling(
+                model_cfg.get('temperature', 1.0), 
+                model_cfg.get('do_sample', True),
+                args.visual_alpha, 
+                args.vcd_alpha, 
+                args.icd_alpha,
+                args.opera_alpha,
+                args.opera_scale
+                )
             model_cfg['visual_alpha'] = args.visual_alpha
             model_cfg['vcd_alpha'] = args.vcd_alpha
+            model_cfg['icd_alpha'] = args.icd_alpha
+            model_cfg['opera_alpha'] = args.opera_alpha
+            model_cfg['opera_scale'] = args.opera_scale
 
         date, commit_id = timestr('day'), githash(digits=8)
         eval_id = f"T{date}_G{commit_id}"

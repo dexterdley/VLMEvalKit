@@ -193,7 +193,11 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         verbose: bool = False,
         use_audio_in_video: bool = False,
         do_sample: bool = False, # added
-        visual_alpha: float = 1.0, # added
+        visual_alpha: float = 1.0,
+        vcd_alpha: float = 1.0,
+        icd_alpha: float = 1.0,
+        opera_alpha: float = 1.0,
+        opera_scale: float = 1.0,
         **kwargs,
     ):
         super().__init__(use_custom_prompt=use_custom_prompt)
@@ -226,6 +230,10 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
         self.temperature = temperature
         self.do_sample = do_sample # added
         self.visual_alpha = visual_alpha
+        self.vcd_alpha = vcd_alpha
+        self.icd_alpha = icd_alpha
+        self.opera_alpha = opera_alpha
+        self.opera_scale = opera_scale
         MODEL_CLS = None
 
         if listinstr(['omni'], model_path.lower()):
@@ -296,10 +304,13 @@ class Qwen2VLChat(Qwen2VLPromptMixin, BaseModel):
                 model_path, torch_dtype='auto', device_map="auto", attn_implementation='flash_attention_2'
             )
             self.model.eval()
-            
             ### Start of additions ###
-            if self.visual_alpha > 0 and not self.use_vllm:
+            if not self.use_vllm:
                 self.model.generation_config.visual_alpha = self.visual_alpha
+                self.model.generation_config.vcd_alpha = self.vcd_alpha
+                self.model.generation_config.icd_alpha = self.icd_alpha
+                self.model.generation_config.opera_alpha = self.opera_alpha
+                self.model.generation_config.opera_scale = self.opera_scale
             ### End of additions ###
         torch.cuda.empty_cache()
 

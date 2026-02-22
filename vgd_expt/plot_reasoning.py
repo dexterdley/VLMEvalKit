@@ -83,6 +83,6 @@ plt.legend(fontsize=10, loc="upper left")
 plt.grid(True, alpha=0.2) # Lighter grid
 
 plt.tight_layout()
-plt.savefig(f"./reasoning_curves.pdf", dpi=100, bbox_inches='tight')
+plt.savefig(f"./reasoning_curves.png", dpi=100, bbox_inches='tight')
 plt.show()
 print("Reasoning plot saved")
