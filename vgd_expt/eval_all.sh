@@ -7,10 +7,11 @@ MODELS=(
   #"Qwen3-VL-8B-Thinking"
   #"Gemma3-4B"
   #"Qwen3-VL-2B-Instruct"
-  "Qwen3-VL-8B-Instruct"
-  "Qwen2.5-VL-7B-Instruct"
-  "InternVL3_5-2B"
-  "InternVL3_5-8B"
+  #"Qwen3-VL-8B-Instruct"
+  #"Qwen2.5-VL-7B-Instruct"
+  #"InternVL3_5-2B"
+  #"InternVL3_5-8B"
+  "llava_next_vicuna_7b"
 )
 for SEED in 42 55 69
 do
@@ -72,7 +73,7 @@ do
 
       CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
         --nproc_per_node=4 \
-        --master_port=29500 \
+        --master_port=29504 \
         ./vgd_expt/run_vgd.py \
         --config ./vgd_expt/my_qwen_config.json \
         --opera_alpha=1.0 \

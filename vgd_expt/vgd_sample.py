@@ -67,7 +67,7 @@ class VisualTextDistortionHook:
     "vis" for VCD (Visual Contrastive Decoding)
     "text for ICD (Instruction Contrastive Decoding)
     """
-    def __init__(self, start_idx, end_idx, noise_type="vis", noise_scale=0.1):
+    def __init__(self, start_idx, end_idx, noise_type="vis", noise_scale=0.01):
         self.start = start_idx
         self.end = end_idx
         self.noise_type = noise_type
@@ -170,6 +170,11 @@ def _sample_vgd(
                 seq_idx = matches[0]
             vstart = seq_idx.min().item()
             vend = seq_idx.max().item()
+            
+        elif "LlavaNextConfig" in type(self.model.config).__name__:
+            image_token_id = getattr(self.model.config, 'image_token_index', 32000)
+            vstart = torch.where(input_ids[0] == image_token_id)[0].min().item()
+            vend = torch.where(input_ids[0] == image_token_id)[0].max().item() + 1
 
         else:
             vs_id  = self.model.config.vision_start_token_id       # e.g., 151652
@@ -398,6 +403,11 @@ def _sample_contrastive(
             vstart = seq_idx.min().item()
             vend = seq_idx.max().item()
 
+        elif "LlavaNextConfig" in type(self.model.config).__name__:
+            image_token_id = getattr(self.model.config, 'image_token_index', 32000)
+            vstart = torch.where(input_ids[0] == image_token_id)[0].min().item()
+            vend = torch.where(input_ids[0] == image_token_id)[0].max().item() + 1
+
         else:
             vs_id  = self.model.config.vision_start_token_id       # e.g., 151652
             ve_id  = self.model.config.vision_end_token_id         # e.g., 151653
@@ -450,10 +460,10 @@ def _sample_contrastive(
         if layers is not None:
             if "Qwen3VL" in type(self.model.config).__name__:
                 for i, layer in enumerate(layers):
-                    hook = VisualTextDistortionHook(vstart, vend, noise_type=noise_type, noise_scale=0.1)
+                    hook = VisualTextDistortionHook(vstart, vend, noise_type=noise_type, noise_scale=0.01)
                     hooks.append(layer.register_forward_pre_hook(hook))
             else:
-                hook = VisualTextDistortionHook(vstart, vend, noise_type=noise_type, noise_scale=0.1)
+                hook = VisualTextDistortionHook(vstart, vend, noise_type=noise_type, noise_scale=0.01)
                 hooks.append(layers[0].register_forward_pre_hook(hook))
             
 
@@ -935,9 +945,9 @@ def evolve_guidance_sampling(temperature=1.0, do_sample=True,
     transformers.generation.utils.GenerationMixin._validate_model_kwargs = _validate_model_kwargs_vgd
     
     if opera_alpha > 0:
-        # OPERA is a Beam Search strategy, so we patch beam_search, not _sample
+        # OPERA is a Beam Search strategy, but we patch it to _sample for convenience
         print(f"Using OPERA Beam Search | Alpha: {opera_alpha} | Scale: {opera_scale}")
-        transformers.generation.utils.GenerationMixin.beam_search = _beam_search_opera
+        transformers.generation.utils.GenerationMixin._sample = _beam_search_opera
         
     elif temperature > 0 and do_sample:
         if visual_alpha > 0:

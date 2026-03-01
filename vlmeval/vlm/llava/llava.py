@@ -271,7 +271,7 @@ class LLaVA_Next(BaseModel):
                     self.model_path,
                     torch_dtype=torch.float16,
                     low_cpu_mem_usage=True,
-                    use_flash_attention_2=True,
+                    attn_implementation="flash_attention_2",
                 )
         else:
             if "interleave" in model_path.lower():
@@ -395,7 +395,7 @@ class LLaVA_Next(BaseModel):
         prompt = self.processor.apply_chat_template(
             conversation, add_generation_prompt=True
         )
-        inputs = self.processor(prompt, images, return_tensors="pt").to(
+        inputs = self.processor(text=prompt, images=images, return_tensors="pt").to(
             "cuda", torch.float16
         )
         output = self.model.generate(**inputs, **self.kwargs)
