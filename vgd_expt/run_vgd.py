@@ -232,6 +232,7 @@ You can launch the evaluation by setting either --data and --model or --config.
     parser.add_argument('--seed', type=int, default=42, help='Random Seed')
     parser.add_argument('--visual_alpha', type=float, default=0.0, help='Visual Alpha for Guidance')
     parser.add_argument('--vcd_alpha', type=float, default=0.0, help='Alpha for VCD')
+    parser.add_argument('--vord_margin', type=float, default=0.0, help='Margin for VORD')
     parser.add_argument('--icd_alpha', type=float, default=0.0, help='Alpha for ICD')
     parser.add_argument('--opera_alpha', type=float, default=0.0, help='Alpha for OPERA')
     parser.add_argument('--opera_scale', type=float, default=0.0, help='Scale for OPERA')
@@ -297,13 +298,15 @@ def main(args):
                 model_cfg.get('temperature', 1.0), 
                 model_cfg.get('do_sample', True),
                 args.visual_alpha, 
-                args.vcd_alpha, 
+                args.vcd_alpha,
                 args.icd_alpha,
+                args.vord_margin, 
                 args.opera_alpha,
                 args.opera_scale
                 )
             model_cfg['visual_alpha'] = args.visual_alpha
             model_cfg['vcd_alpha'] = args.vcd_alpha
+            model_cfg['vord_margin'] = args.vord_margin
             model_cfg['icd_alpha'] = args.icd_alpha
             model_cfg['opera_alpha'] = args.opera_alpha
             model_cfg['opera_scale'] = args.opera_scale

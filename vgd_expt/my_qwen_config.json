@@ -4,9 +4,9 @@
             "max_new_tokens": 1024,
             "temperature": 1.0,
             "do_sample": true,
+            "num_beams": 1,
             "verbose": false,
             "reuse": false,
-
             "use_custom_prompt": false,
             "use_vllm": false,
             "repetition_penalty": 1.0,
@@ -14,8 +14,7 @@
             "top_p": 1.0,
             "top_k": 20
         }
-    }, 
-
+    },
     "data": {
         "MMStar": {},
         "MME": {},

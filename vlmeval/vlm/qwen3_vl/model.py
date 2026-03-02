@@ -71,6 +71,7 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
         do_sample: bool = False, # added
         visual_alpha: float = 1.0,
         vcd_alpha: float = 1.0,
+        vord_margin: float = 1.0,
         icd_alpha: float = 1.0,
         opera_alpha: float = 1.0,
         opera_scale: float = 1.0,
@@ -89,6 +90,7 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
         self.do_sample = do_sample # added
         self.visual_alpha = visual_alpha
         self.vcd_alpha = vcd_alpha
+        self.vord_margin = vord_margin
         self.icd_alpha = icd_alpha
         self.opera_alpha = opera_alpha
         self.opera_scale = opera_scale
@@ -178,6 +180,7 @@ class Qwen3VLChat(Qwen3VLPromptMixin, BaseModel):
             if not self.use_vllm:
                 self.model.generation_config.visual_alpha = self.visual_alpha
                 self.model.generation_config.vcd_alpha = self.vcd_alpha
+                self.model.generation_config.vord_margin = self.vord_margin
                 self.model.generation_config.icd_alpha = self.icd_alpha
                 self.model.generation_config.opera_alpha = self.opera_alpha
                 self.model.generation_config.opera_scale = self.opera_scale
