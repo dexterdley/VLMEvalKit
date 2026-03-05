@@ -489,7 +489,7 @@ def _sample_contrastive(
 
             if vord_margin > 0:
                 cd_logits = next_token_logits_clean.clone()
-                mask = next_token_logits_distorted > (next_token_logits_clean + vord_margin)
+                mask = next_token_logits_distorted >= (next_token_logits_clean + vord_margin)
                 cd_logits[mask] = -float('inf')
 
             else:

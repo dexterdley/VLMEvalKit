@@ -36,7 +36,7 @@ do
         --master_port=29505 \
         ./vgd_expt/run_vgd.py \
         --config ./vgd_expt/my_qwen_config.json \
-        --vord_margin=0.1 \
+        --vord_margin=0.05 \
         --model=${MODEL} \
         --seed=${SEED} \
         --work-dir ./outputs/${MODEL}/${MODEL}_VORD_${SEED} \
